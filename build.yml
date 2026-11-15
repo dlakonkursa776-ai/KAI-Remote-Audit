@@ -1,0 +1,37 @@
+
+name: Build KAI Windows x64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Agent
+        run: pyinstaller --noconfirm --onefile --windowed --name KAI_Agent --paths kai kai/agent.py
+
+      - name: Build Control
+        run: pyinstaller --noconfirm --onefile --windowed --name KAI_Control --paths kai kai/control.py
+
+      - name: Upload EXE files
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAI-Windows-x64
+          path: dist/*.exe

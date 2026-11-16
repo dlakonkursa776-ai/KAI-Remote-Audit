@@ -209,23 +209,58 @@ def format_section(key, value):
             return "Сетевые сведения не получены."
         lines = []
         adapters = value.get("adapters", {}) if isinstance(value, dict) else {}
-        for adapter, addresses in adapters.items():
-            lines.append(f"СЕТЕВОЙ АДАПТЕР: {adapter}")
-            for item in addresses:
-                family = item.get("family")
-                family_name = {"2": "IPv4", "10": "IPv6", "23": "IPv6"}.get(str(family), "Адрес")
-                lines.append(f"  {family_name}: {item.get('address', 'нет данных')}")
+        family_names = {"2": "IPv4", "10": "IPv6", "23": "IPv6"}
+        for adapter_name, addresses in adapters.items():
+            useful = [a for a in addresses if a.get("address")]
+            if not useful:
+                continue
+            lines.append(f"{adapter_name}")
+            for item in useful:
+                family = family_names.get(str(item.get("family")), "Адрес")
+                lines.append(f"  {family}: {item.get('address', '—')}")
                 if item.get("netmask"):
                     lines.append(f"  Маска: {item['netmask']}")
+            lines.append("")
         connections = value.get("connections", []) if isinstance(value, dict) else []
+        state_names = {
+            "ESTABLISHED": "Активно",
+            "LISTEN": "Ожидает подключения",
+            "TIME_WAIT": "Завершает соединение",
+            "CLOSE_WAIT": "Ожидает закрытия",
+            "SYN_SENT": "Устанавливает соединение",
+            "SYN_RECV": "Получает запрос",
+            "FIN_WAIT1": "Закрытие соединения",
+            "FIN_WAIT2": "Ожидает завершения",
+            "CLOSED": "Закрыто",
+            "NONE": "Не установлено",
+        }
+        def endpoint(raw):
+            if not raw:
+                return "—"
+            # psutil namedtuple string form: addr(ip='1.2.3.4', port=443)
+            match = re.search(r"ip=['\"](.*?)['\"],\\s*port=(\\d+)", str(raw))
+            if match:
+                host, port = match.groups()
+                return f"{host}:{port}"
+            return str(raw)
+        lines.append("СОЕДИНЕНИЯ")
+        lines.append(f"Всего записей: {len(connections)}")
         lines.append("")
-        lines.append(f"СЕТЕВЫЕ СОЕДИНЕНИЯ: {len(connections)}")
         for i, item in enumerate(connections[:100], 1):
-            local = item.get("local", "—")
-            remote = item.get("remote", "—")
-            status = item.get("status", "не определено")
-            lines.append(f"{i}. {local}  →  {remote}  |  {status}")
-        return "\\n".join(lines) if lines else readable_value(value)
+            local = endpoint(item.get("local"))
+            remote = endpoint(item.get("remote"))
+            raw_state = str(item.get("status") or "NONE")
+            state = state_names.get(raw_state, raw_state.replace("_", " ").capitalize())
+            pid = item.get("pid")
+            lines.append(
+                f"{i}. {local}  →  {remote}\n"
+                f"   Состояние: {state}\n"
+                f"   Процесс ID: {pid if pid is not None else 'нет данных'}"
+            )
+        if len(connections) > 100:
+            lines.append("")
+            lines.append(f"Показаны первые 100 из {len(connections)} соединений.")
+        return "\n\n".join(lines) if lines else "Сетевые адаптеры и соединения не обнаружены."
     if key == "processes":
         if not value:
             return "Сведения о процессах не получены."
@@ -273,8 +308,9 @@ class Control:
         self.panel = "#151515"
         self.panel2 = "#202020"
         self.gold = "#D6B45A"
-        self.gold_soft = "#B99A4B"
-        self.muted = "#B8A979"
+        self.gold_soft = "#806B3C"
+        self.white = "#F0EEE8"
+        self.muted = "#AAA69A"
         self.root.configure(bg=self.bg)
 
         style = ttk.Style()
@@ -288,7 +324,7 @@ class Control:
                         font=("Segoe UI", 9))
         style.configure("TFrame", background=self.bg)
         style.configure("Panel.TFrame", background=self.panel)
-        style.configure("TLabel", background=self.bg, foreground=self.gold)
+        style.configure("TLabel", background=self.bg, foreground=self.white)
         style.configure("Muted.TLabel", background=self.bg, foreground=self.muted)
         style.configure("Header.TLabel", background=self.bg, foreground=self.gold,
                         font=("Segoe UI", 18, "bold"))
@@ -298,17 +334,25 @@ class Control:
                         bordercolor=self.gold_soft, padding=(10, 6))
         style.map("TButton", background=[("active", "#34302A")],
                   foreground=[("active", "#F2D889")])
-        style.configure("TNotebook", background=self.bg, bordercolor=self.gold_soft)
-        style.configure("TNotebook.Tab", background=self.panel2, foreground=self.gold,
-                        padding=(11, 7))
+        style.configure("TNotebook", background=self.bg, borderwidth=0, tabmargins=(0, 0, 0, 0))
+        style.configure("TNotebook.Tab", background=self.panel2, foreground=self.white,
+                        borderwidth=0, padding=(12, 7))
         style.map("TNotebook.Tab", background=[("selected", "#34302A")],
                   foreground=[("selected", "#F2D889")])
         style.configure("Treeview", background=self.panel, fieldbackground=self.panel,
-                        foreground=self.gold, rowheight=27, bordercolor=self.gold_soft)
+                        foreground=self.white, rowheight=29, borderwidth=0)
         style.configure("Treeview.Heading", background=self.panel2, foreground=self.gold,
-                        font=("Segoe UI", 9, "bold"))
+                        borderwidth=0, font=("Segoe UI", 9, "bold"))
         style.map("Treeview", background=[("selected", "#514326")],
-                  foreground=[("selected", "#FFE7A0")])
+                  foreground=[("selected", "#FFFFFF")])
+        style.configure("KAI.Vertical.TScrollbar", gripcount=0, background="#4B4028",
+                        troughcolor=self.panel, bordercolor=self.panel,
+                        arrowcolor=self.gold, relief="flat", width=12)
+        style.layout("KAI.Vertical.TScrollbar", [
+            ("Vertical.Scrollbar.trough", {"children": [
+                ("Vertical.Scrollbar thumb", {"expand": "1", "sticky": "nswe"})
+            ], "sticky": "ns"})
+        ])
 
         header = ttk.Frame(self.root, padding=(16, 12))
         header.pack(fill="x")
@@ -320,7 +364,7 @@ class Control:
         state_panel.pack(fill="x", padx=12, pady=(0, 7))
         ttk.Label(state_panel, text="ТЕКУЩЕЕ СОСТОЯНИЕ", style="Section.TLabel").pack(anchor="w")
         self.status_label = tk.Label(state_panel, textvariable=self.status,
-                                     bg=self.panel, fg=self.gold, anchor="w",
+                                     bg=self.panel, fg=self.white, anchor="w",
                                      justify="left", font=("Segoe UI", 10, "bold"),
                                      wraplength=1100)
         self.status_label.pack(fill="x", pady=(5, 0))
@@ -331,9 +375,9 @@ class Control:
         ttk.Label(activity_panel, text="ЖУРНАЛ ДЕЙСТВИЙ", style="Section.TLabel").pack(anchor="w")
         self.activity = tk.Text(activity_panel, height=3, wrap="word",
                                 font=("Segoe UI", 9), state="disabled",
-                                background=self.panel, foreground=self.muted,
+                                background=self.panel, foreground=self.white,
                                 insertbackground=self.gold, relief="flat",
-                                highlightthickness=1, highlightbackground=self.gold_soft)
+                                highlightthickness=0)
         self.activity.pack(fill="x", pady=(4, 0))
         self.log_activity("Центр управления запускается. Проверяется доступность сетевых портов.")
 
@@ -381,14 +425,13 @@ class Control:
                            state="disabled", background=self.panel,
                            foreground=self.gold, insertbackground=self.gold,
                            selectbackground="#514326", selectforeground="#FFE7A0",
-                           relief="flat", padx=10, pady=8,
-                           highlightthickness=1, highlightbackground=self.gold_soft)
-            y = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
-            x = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
-            text.configure(yscrollcommand=y.set, xscrollcommand=x.set)
+                           relief="flat", padx=12, pady=10,
+                           highlightthickness=0)
+            y = ttk.Scrollbar(frame, orient="vertical", style="KAI.Vertical.TScrollbar",
+                              command=text.yview)
+            text.configure(yscrollcommand=y.set)
             text.grid(row=0, column=0, sticky="nsew")
             y.grid(row=0, column=1, sticky="ns")
-            x.grid(row=1, column=0, sticky="ew")
             frame.rowconfigure(0, weight=1)
             frame.columnconfigure(0, weight=1)
             self.views[key] = text
@@ -526,7 +569,7 @@ class Control:
         win.geometry("900x650")
         win.configure(bg="#090909")
         text = tk.Text(win, wrap="word", font=("Segoe UI", 10),
-                       background="#151515", foreground="#D6B45A",
+                       background="#151515", foreground="#F0EEE8",
                        insertbackground="#D6B45A", selectbackground="#514326",
                        relief="flat", padx=10, pady=8)
         sy = ttk.Scrollbar(win, orient="vertical", command=text.yview)

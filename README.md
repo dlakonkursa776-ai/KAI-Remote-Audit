@@ -73,3 +73,10 @@ the action history are separate areas; the action history is bounded to the late
 100 entries so it does not crowd the dashboard. Diagnostic tabs use readable
 Russian text and a consistent layout. The technical JSON tab remains available
 for troubleshooting and export.
+
+
+## Network tab presentation update
+Network adapters and connections are now presented as readable entries with
+friendly connection-state names and compact endpoint notation. The main report
+text is white, gold is reserved for accents, and tab content uses a minimal
+scrollbar without Windows arrow buttons.

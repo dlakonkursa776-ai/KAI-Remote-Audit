@@ -48,3 +48,20 @@ knowledge and authorization.
 ## Build
 Upload repository contents to GitHub. Open Actions → Build KAI Windows x64 → Run workflow.
 Download artifact `KAI-Windows-x64`.
+
+
+## Readable interface and connection states
+The Control Center displays diagnostic values as readable Russian labels instead of raw JSON
+in the main tabs. The activity area records startup, listener errors, incoming reports,
+and successful saves. The Agent reports search, discovery, collection, sending, acceptance,
+and retry/error states. The Full JSON tab remains available for technical troubleshooting.
+
+## Important network limitation
+This build does not bypass network restrictions. Both computers must be on a network where
+the owner/admin has allowed UDP 39571 and TCP 39572 between them. Windows Firewall may block
+these ports; allow the two executables only on the trusted Private network and only for the
+local subnet, following the organization's policy. Do not expose these ports to the public
+internet. The current discovery beacon sends its temporary token over UDP, so this version
+is intended only for an isolated, trusted virtual lab and is not suitable for an open/shared
+network. Use a properly authenticated VPN or a separately configured secure remote
+administration service for networks you do not control.

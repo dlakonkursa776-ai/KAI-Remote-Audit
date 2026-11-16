@@ -36,13 +36,20 @@ class Server:
         self.running = True
         self.ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.ctx.load_cert_chain(self.cert, self.key)
-        threading.Thread(target=self.discovery, daemon=True).start()
-        threading.Thread(target=self.listen, daemon=True).start()
+        threading.Thread(target=self.discovery, daemon=True, name="KAI-UDP-discovery").start()
+        threading.Thread(target=self.listen, daemon=True, name="KAI-TCP-listener").start()
 
     def discovery(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("", DISCOVERY_PORT))
+        try:
+            s.bind(("", DISCOVERY_PORT))
+            self.ui.root.after(0, self.ui.set_status,
+                               f"Служба обнаружения запущена: UDP {DISCOVERY_PORT}.")
+        except OSError as e:
+            self.ui.root.after(0, self.ui.set_status,
+                               f"ОШИБКА: не удалось запустить обнаружение UDP {DISCOVERY_PORT}: {e}")
+            return
         s.settimeout(1)
         while self.running:
             try:
@@ -62,8 +69,15 @@ class Server:
     def listen(self):
         s = socket.socket()
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("", self.port))
-        s.listen(8)
+        try:
+            s.bind(("", self.port))
+            s.listen(8)
+            self.ui.root.after(0, self.ui.set_status,
+                               f"Приём отчётов запущен: TCP {self.port}. Ожидание агентов.")
+        except OSError as e:
+            self.ui.root.after(0, self.ui.set_status,
+                               f"ОШИБКА: не удалось открыть TCP {self.port}: {e}")
+            return
         s.settimeout(1)
         while self.running:
             try:
@@ -103,9 +117,12 @@ class Server:
                 name = report.get("system", {}).get("computer_name", "unknown")
                 safe = "".join(ch for ch in name if ch.isalnum() or ch in "-_")[:60] or "unknown"
                 path = DATA / f"{safe}_{datetime.now():%Y%m%d_%H%M%S}.json"
+                self.ui.root.after(0, self.ui.set_status,
+                                   f"Отчёт принят от {name} ({addr[0]}). Сохранение данных…")
                 path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
                 self.ui.root.after(0, self.ui.refresh_reports)
-                self.ui.root.after(0, self.ui.set_status, f"Получен отчёт от {name} ({addr[0]})")
+                self.ui.root.after(0, self.ui.set_status,
+                                   f"Отчёт сохранён: {name} ({addr[0]}), файл {path.name}")
                 c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
         except Exception as e:
             try:
@@ -135,6 +152,83 @@ def report_computer(report, path):
     return (report.get("system", {}).get("computer_name")
             or Path(path).stem.split("_")[0] or "unknown")
 
+
+FIELD_NAMES = {
+    "computer_name": "Имя компьютера", "user": "Пользователь",
+    "os": "Операционная система", "windows_version": "Версия Windows",
+    "architecture": "Архитектура", "ip_addresses": "IP-адреса",
+    "boot_time": "Время запуска Windows", "collected_at": "Время сбора",
+    "cpu": "Процессор", "logical_cores": "Логических ядер",
+    "physical_cores": "Физических ядер", "cpu_percent": "Загрузка процессора",
+    "ram_total_gb": "Всего оперативной памяти, ГБ",
+    "ram_available_gb": "Доступно оперативной памяти, ГБ",
+    "ram_percent": "Использование оперативной памяти, %",
+    "disks": "Диски", "device": "Устройство", "mount": "Точка подключения",
+    "filesystem": "Файловая система", "total_gb": "Объём, ГБ",
+    "used_gb": "Занято, ГБ", "free_gb": "Свободно, ГБ", "percent": "Занято, %",
+    "pid": "ID процесса", "name": "Название", "username": "Пользователь",
+    "memory_mb": "Память, МБ", "cpu_percent": "Загрузка CPU, %",
+    "status": "Состояние", "adapters": "Сетевые адаптеры",
+    "connections": "Сетевые соединения", "family": "Тип адреса",
+    "address": "Адрес", "netmask": "Маска сети", "type": "Тип соединения",
+    "local": "Локальный адрес", "remote": "Удалённый адрес",
+    "publisher": "Издатель", "version": "Версия",
+    "source": "Источник данных", "events_text": "События Windows",
+    "error": "Ошибка"
+}
+
+def readable_value(value):
+    if value is None:
+        return "Нет данных"
+    if isinstance(value, bool):
+        return "Да" if value else "Нет"
+    if isinstance(value, list):
+        if not value:
+            return "Нет данных"
+        if all(not isinstance(x, (dict, list)) for x in value):
+            return ", ".join(str(x) for x in value)
+        return "\n\n".join(
+            f"{i}. " + readable_value(item).replace("\n", "\n   ")
+            for i, item in enumerate(value, 1)
+        )
+    if isinstance(value, dict):
+        if not value:
+            return "Нет данных"
+        lines = []
+        for key, item in value.items():
+            label = FIELD_NAMES.get(str(key), str(key).replace("_", " ").capitalize())
+            rendered = readable_value(item)
+            lines.append(f"{label}:\n{rendered}" if isinstance(item, (dict, list))
+                         else f"{label}: {rendered}")
+        return "\n".join(lines)
+    return str(value)
+
+def format_section(key, value):
+    if key == "processes":
+        if not value:
+            return "Сведения о процессах не получены."
+        rows = []
+        for i, p in enumerate(value, 1):
+            rows.append(
+                f"{i}. {p.get('name') or 'Без названия'}\n"
+                f"   ID процесса: {p.get('pid', '—')}\n"
+                f"   Пользователь: {p.get('user') or 'нет данных'}\n"
+                f"   Память: {p.get('memory_mb', '—')} МБ\n"
+                f"   Загрузка CPU: {p.get('cpu_percent', '—')}%\n"
+                f"   Состояние: {p.get('status') or 'нет данных'}"
+            )
+        return "\n\n".join(rows)
+    if key == "software":
+        if not value:
+            return "Список установленных программ пуст или недоступен."
+        return "\n\n".join(
+            f"{i}. {p.get('name', 'Без названия')}\n"
+            f"   Версия: {p.get('version') or 'не указана'}\n"
+            f"   Издатель: {p.get('publisher') or 'не указан'}"
+            for i, p in enumerate(value, 1)
+        )
+    return readable_value(value)
+
 class Control:
     def __init__(self, root):
         self.root = root
@@ -149,14 +243,19 @@ class Control:
         self.refresh_reports()
         self.server = Server(self)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
-        self.set_status(f"Ожидание агентов. TCP {APP_PORT}, UDP discovery {DISCOVERY_PORT}.")
+        self.set_status(f"Запуск сетевых служб. Ожидаемые порты: UDP {DISCOVERY_PORT}, TCP {APP_PORT}.")
 
     def _build_ui(self):
         top = ttk.Frame(self.root, padding=12)
         top.pack(fill="x")
         ttk.Label(top, text="KAI Remote Audit", font=("Segoe UI", 19, "bold")).pack(side="left")
         ttk.Label(top, text="Центр управления", foreground="gray").pack(side="left", padx=14)
-        ttk.Label(self.root, textvariable=self.status, padding=(12, 4)).pack(fill="x")
+        self.status_label = ttk.Label(self.root, textvariable=self.status, padding=(12, 4))
+        self.status_label.pack(fill="x")
+        self.activity = tk.Text(self.root, height=4, wrap="word", font=("Segoe UI", 9),
+                                state="disabled", background="#f4f4f4")
+        self.activity.pack(fill="x", padx=12, pady=(0, 6))
+        self.log_activity("Центр управления запускается. Проверяется доступность сетевых портов.")
 
         main = ttk.Panedwindow(self.root, orient="horizontal")
         main.pack(fill="both", expand=True, padx=10, pady=8)
@@ -211,8 +310,18 @@ class Control:
         ttk.Label(bottom, text="Агент отправляет диагностический отчёт по локальной сети. Произвольное выполнение CMD в KAI не предусмотрено.",
                   foreground="gray").pack(anchor="w")
 
+    def log_activity(self, value):
+        if not hasattr(self, "activity"):
+            return
+        stamp = datetime.now().strftime("%H:%M:%S")
+        self.activity.configure(state="normal")
+        self.activity.insert("end", f"{stamp} — {value}\\n")
+        self.activity.see("end")
+        self.activity.configure(state="disabled")
+
     def set_status(self, value):
         self.status.set(value)
+        self.log_activity(value)
 
     def close(self):
         if hasattr(self, "server"):
@@ -282,11 +391,11 @@ class Control:
             "Установленных программ": len(report.get("software", []) or []),
         }
         self._put("summary", summary)
-        self._put("hardware", report.get("hardware", {}))
-        self._put("processes", report.get("processes", []))
-        self._put("network", report.get("network", {}))
-        self._put("software", report.get("software", []))
-        self._put("events", report.get("events", {}))
+        self._put("hardware", format_section("hardware", report.get("hardware", {})))
+        self._put("processes", format_section("processes", report.get("processes", [])))
+        self._put("network", format_section("network", report.get("network", {})))
+        self._put("software", format_section("software", report.get("software", [])))
+        self._put("events", format_section("events", report.get("events", {})))
         self._put("raw", report)
 
     def selected_paths(self):

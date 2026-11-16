@@ -30,9 +30,7 @@ class Agent:
         except Exception as e: log(f"discovery: {e}")
         finally: s.close()
         return None
-    def send_report(self, server):
-        report=collect_all()
-        report["agent_id"]=str(uuid.uuid4()) if False else hostname()
+    def send_report(self, server, report):
         raw=json.dumps(report,ensure_ascii=False).encode("utf-8")
         # TLS certificate fingerprint is pinned from the local discovery beacon.
         ctx=ssl.create_default_context(); ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE
@@ -54,18 +52,25 @@ class Agent:
         log("report sent")
     def run(self):
         while not self.stop:
-            self.status("Поиск KAI Control Center в локальной сети…")
+            self.status("Состояние: поиск управляющего компьютера в локальной сети.")
+            log("Состояние: поиск управляющего компьютера")
             server=self.discover()
             if not server:
-                self.status("Управляющий ПК не найден. Повтор через 10 секунд.")
+                self.status("Состояние: управляющий компьютер не найден. Повтор поиска через 10 секунд.")
+                log("Состояние: управляющий компьютер не найден")
                 time.sleep(10); continue
             try:
-                self.status(f"Найден управляющий ПК: {server['host']}. Сбор диагностики…")
-                self.send_report(server)
-                self.status(f"Отчёт передан успешно ({self.last_report}). Следующая проверка через 5 минут.")
+                self.status(f"Состояние: управляющий компьютер обнаружен ({server['host']}). Начинаю сбор данных.")
+                log(f"Состояние: управляющий компьютер обнаружен ({server['host']})")
+                self.status("Состояние: сбор системной информации, оборудования, процессов, сети, программ и событий Windows.")
+                report = collect_all()
+                report["agent_id"] = hostname()
+                self.status("Состояние: отправка диагностического отчёта.")
+                self.send_report(server, report)
+                self.status(f"Состояние: отчёт принят управляющим компьютером ({self.last_report}). Следующая отправка через 5 минут.")
                 time.sleep(300)
             except Exception as e:
-                log(str(e)); self.status(f"Ошибка передачи: {e}. Повтор через 15 секунд.")
+                log(str(e)); self.status(f"Состояние: ошибка передачи отчёта — {e}. Повтор через 15 секунд.")
                 time.sleep(15)
 
 def main():

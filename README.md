@@ -87,3 +87,12 @@ The report viewer now isolates errors per tab so a malformed network field canno
 
 ## Remote command execution
 This package does not yet include remote CMD execution. The current agent protocol only uploads reports; adding an interactive remote shell requires a separately authenticated, explicitly enabled command channel and an action audit log. No fake terminal is presented as a working remote shell.
+
+
+## Control PC / monitored PC separation
+The Control Center is an operator console only. It does not call `collect_all()`
+and does not collect local CPU, memory, process, network, software, or event data.
+The Monitor tab lists only valid reports received from remote `KAI_Agent.exe`
+instances. Reports whose computer name matches the Control PC hostname are excluded,
+including older local-agent test reports. The monitor shows the latest received
+snapshot per remote agent; it does not imply continuous real-time sampling.

@@ -31,7 +31,9 @@ def system_info():
         "os": platform.platform(), "windows_version": platform.version(),
         "architecture": platform.machine(), "ip_addresses": local_ips(),
         "boot_time": datetime.fromtimestamp(psutil.boot_time()).isoformat(),
-        "collected_at": datetime.now(timezone.utc).isoformat()
+        "collected_at": datetime.now(timezone.utc).isoformat(),
+        # Site tag is an operator-defined label; Windows PCs do not provide GPS coordinates.
+        "site_tag": os.environ.get("KAI_SITE_TAG", "Не задано")
     }
 
 def hardware_info():

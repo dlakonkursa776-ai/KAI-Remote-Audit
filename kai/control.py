@@ -423,6 +423,33 @@ class Control:
         self.notebook = ttk.Notebook(right)
         self.notebook.pack(fill="both", expand=True)
         self.views = {}
+        self.monitor_frame = ttk.Frame(self.notebook, padding=8, style="Panel.TFrame")
+        self.notebook.add(self.monitor_frame, text="▥  Мониторинг")
+        ttk.Label(self.monitor_frame, text="МОНИТОР УДАЛЁННОГО КОМПЬЮТЕРА",
+                  style="Section.TLabel").pack(anchor="w", pady=(0, 6))
+        ttk.Label(self.monitor_frame,
+                  text="Отображаются только компьютеры с запущенным KAI_Agent.exe. ПК с KAI_Control.exe не собирает данные и исключён из наблюдения.",
+                  style="Muted.TLabel").pack(anchor="w", pady=(0, 8))
+        self.monitor_tree = ttk.Treeview(
+            self.monitor_frame,
+            columns=("pc", "cpu", "ram", "processes", "top_process", "collected"),
+            show="headings", height=12
+        )
+        for col, title, width in [
+            ("pc", "Компьютер", 145), ("cpu", "CPU", 70), ("ram", "ОЗУ", 70),
+            ("processes", "Процессы", 80), ("top_process", "Наиболее активный процесс", 220),
+            ("collected", "Время снимка", 145)
+        ]:
+            self.monitor_tree.heading(col, text=title)
+            self.monitor_tree.column(col, width=width, anchor="w")
+        self.monitor_tree.pack(fill="both", expand=True)
+        self.monitor_detail = tk.Text(self.monitor_frame, height=9, wrap="word",
+                                      state="disabled", background=self.panel,
+                                      foreground=self.white, relief="flat",
+                                      padx=10, pady=8, highlightthickness=0)
+        self.monitor_detail.pack(fill="x", pady=(8, 0))
+        self.monitor_tree.bind("<<TreeviewSelect>>", self.on_monitor_select)
+
         for key, title in [
             ("summary", "◈  Сводка"), ("hardware", "▦  Оборудование"),
             ("processes", "▤  Процессы"), ("network", "⌁  Сеть"),
@@ -451,6 +478,86 @@ class Control:
         ttk.Label(footer,
                   text="KAI  •  Локальный аудит  •  Отчёты сохраняются на этом компьютере",
                   style="Muted.TLabel").pack(anchor="w")
+
+    def latest_reports_by_computer(self):
+        """Return only reports from remote agents; never monitor the Control PC itself."""
+        latest = {}
+        controller_name = hostname().strip().casefold()
+        for path in sorted(DATA.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            report = read_report(path)
+            system = report.get("system", {}) if isinstance(report, dict) else {}
+            name = str(system.get("computer_name") or path.stem.split("_")[0]).strip()
+            # Control Center is an operator console, not a monitored endpoint.
+            if name.casefold() == controller_name:
+                continue
+            # Ignore malformed/non-agent files and keep only the newest report per agent.
+            if not isinstance(report, dict) or not system or not report.get("agent_id"):
+                continue
+            if name not in latest:
+                latest[name] = (path, report)
+        return latest
+
+    def refresh_monitor(self):
+        if not hasattr(self, "monitor_tree"):
+            return
+        for item in self.monitor_tree.get_children():
+            self.monitor_tree.delete(item)
+        self.monitor_paths = {}
+        latest = self.latest_reports_by_computer()
+        for name, (path, report) in latest.items():
+            system = report.get("system", {})
+            hardware = report.get("hardware", {})
+            processes = report.get("processes", []) or []
+            cpu = hardware.get("cpu_percent")
+            ram = hardware.get("ram_percent")
+            top = processes[0].get("name", "—") if processes and isinstance(processes[0], dict) else "—"
+            stamp = system.get("collected_at", "")
+            try:
+                stamp = datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone().strftime("%d.%m %H:%M:%S")
+            except Exception:
+                stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime("%d.%m %H:%M:%S")
+            iid = self.monitor_tree.insert("", "end", values=(
+                name, f"{cpu:.1f}%" if isinstance(cpu, (int, float)) else "нет данных",
+                f"{ram:.1f}%" if isinstance(ram, (int, float)) else "нет данных",
+                len(processes), top, stamp
+            ))
+            self.monitor_paths[iid] = report
+        if not latest:
+            self.monitor_detail.configure(state="normal")
+            self.monitor_detail.delete("1.0", "end")
+            self.monitor_detail.insert(
+                "1.0",
+                "Удалённых агентов пока нет. Запустите KAI_Agent.exe на ПК №2.\\n"
+                "Этот компьютер с KAI_Control.exe намеренно исключён из мониторинга."
+            )
+            self.monitor_detail.configure(state="disabled")
+
+    def on_monitor_select(self, _event=None):
+        selected = self.monitor_tree.selection()
+        if not selected:
+            return
+        report = self.monitor_paths.get(selected[0], {})
+        system = report.get("system", {})
+        hardware = report.get("hardware", {})
+        processes = report.get("processes", []) or []
+        lines = [
+            f"Источник: удалённый агент KAI_Agent.exe",
+            f"Компьютер: {system.get('computer_name', '—')}",
+            f"Метка площадки: {system.get('site_tag', 'Не задано')}",
+            f"IP-адреса: {', '.join(system.get('ip_addresses', []) or []) or '—'}",
+            f"Процессор: {hardware.get('cpu', '—')}",
+            f"Загрузка CPU: {hardware.get('cpu_percent', '—')}%",
+            f"Использование ОЗУ: {hardware.get('ram_percent', '—')}%",
+            "", "ПРОЦЕССЫ — верхние 10 по использованию памяти:"
+        ]
+        for i, proc in enumerate(processes[:10], 1):
+            if isinstance(proc, dict):
+                lines.append(f"{i}. {proc.get('name', '—')}  | PID {proc.get('pid', '—')}  | "
+                             f"CPU {proc.get('cpu_percent', '—')}%  | RAM {proc.get('memory_mb', '—')} МБ")
+        self.monitor_detail.configure(state="normal")
+        self.monitor_detail.delete("1.0", "end")
+        self.monitor_detail.insert("1.0", "\n".join(lines))
+        self.monitor_detail.configure(state="disabled")
 
     def log_activity(self, value):
         if not hasattr(self, "activity"):
@@ -482,10 +589,14 @@ class Control:
         self.paths.clear()
         needle = self.filter_text.get().strip().lower()
         files = sorted(DATA.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        controller_name = hostname().strip().casefold()
         for path in files:
             report = read_report(path)
-            system = report.get("system", {})
-            name = system.get("computer_name", path.stem)
+            system = report.get("system", {}) if isinstance(report, dict) else {}
+            name = str(system.get("computer_name") or path.stem)
+            # Hide reports from this Control PC too, including historical local-agent tests.
+            if name.strip().casefold() == controller_name:
+                continue
             ip = ", ".join(system.get("ip_addresses", []) or [])
             stamp = system.get("collected_at", "")
             try:
@@ -497,6 +608,7 @@ class Control:
             iid = self.tree.insert("", "end", values=(name, ip, when))
             self.paths[iid] = str(path)
         self.set_status(f"В истории: {len(self.paths)} отчётов. Папка: {DATA}")
+        self.refresh_monitor()
         if selected:
             for iid, path in self.paths.items():
                 if iid in selected:
@@ -530,6 +642,7 @@ class Control:
             "Версия Windows": system.get("windows_version"),
             "Архитектура": system.get("architecture"),
             "IP-адреса": system.get("ip_addresses"),
+            "Метка площадки": system.get("site_tag", "Не задано"),
             "Время загрузки": system.get("boot_time"),
             "Собрано": system.get("collected_at"),
             "Процессов": len(report.get("processes", []) or []),

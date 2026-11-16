@@ -69,16 +69,42 @@ class Agent:
                 time.sleep(15)
 
 def main():
-    root=tk.Tk(); root.title("KAI Agent"); root.geometry("470x190"); root.resizable(False,False)
-    tk.Label(root,text="KAI Remote Audit",font=("Segoe UI",16,"bold")).pack(pady=(18,8))
-    status=tk.StringVar(value="Запуск агента…")
-    tk.Label(root,textvariable=status,wraplength=420,justify="center").pack(padx=18,pady=12)
-    tk.Label(root,text="Диагностика работает в видимом режиме. Закрытие окна останавливает агент.",
-             font=("Segoe UI",8),fg="gray").pack(pady=4)
-    agent=Agent(lambda x: root.after(0,status.set,x))
-    th=threading.Thread(target=agent.run,daemon=True); th.start()
+    import argparse
+    parser = argparse.ArgumentParser(description="KAI Remote Audit Agent")
+    parser.add_argument("--headless", action="store_true",
+                        help="Run without a window; stop KAI_Agent.exe from Windows Task Manager.")
+    args = parser.parse_args()
+
+    if args.headless:
+        # Explicitly user-launched mode: no service, autorun, persistence, or command shell.
+        agent = Agent(lambda message: log(message))
+        log("Agent started in explicit headless mode")
+        try:
+            agent.run()
+        except KeyboardInterrupt:
+            agent.stop = True
+            log("Agent stopped by user")
+        return
+
+    root = tk.Tk()
+    root.title("KAI Agent")
+    root.geometry("470x190")
+    root.resizable(False, False)
+    tk.Label(root, text="KAI Remote Audit", font=("Segoe UI", 16, "bold")).pack(pady=(18, 8))
+    status = tk.StringVar(value="Запуск агента…")
+    tk.Label(root, textvariable=status, wraplength=420, justify="center").pack(padx=18, pady=12)
+    tk.Label(root, text="Закрытие окна останавливает агент. Фоновый режим запускается отдельно ключом --headless.",
+             font=("Segoe UI", 8), fg="gray").pack(pady=4)
+    agent = Agent(lambda x: root.after(0, status.set, x))
+    th = threading.Thread(target=agent.run, daemon=True)
+    th.start()
+
     def close():
-        agent.stop=True; root.destroy()
-    root.protocol("WM_DELETE_WINDOW",close)
+        agent.stop = True
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", close)
     root.mainloop()
-if __name__=="__main__": main()
+
+if __name__ == "__main__":
+    main()

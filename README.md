@@ -1,32 +1,50 @@
 # KAI Remote Audit — Windows x64 source
 
-## Included in this implementation
-- Native Windows one-file EXE packaging via PyInstaller (Python runtime bundled).
-- Agent GUI with automatic UDP LAN discovery and recurring reports.
-- Control Center GUI with TLS listener, certificate pinning, per-session random token,
-  JSON report storage, report list, open/export controls.
+## Included
+- `KAI_Control.exe`: Control Center with a saved-report history, search, computer/IP/time list,
+  diagnostic tabs (summary, hardware, processes, network, software, Windows events), JSON export,
+  and side-by-side text comparison of two selected reports.
+- `KAI_Agent.exe`: diagnostic agent. By default it displays a small status window.
 - Six diagnostic groups: system, hardware, processes, network, installed software,
-  Windows System event log.
+  and Windows System event log.
+- One-file EXE packaging through PyInstaller; Python runtime is bundled.
 
-## Build
-Upload repository contents to GitHub. Open Actions → Build KAI Windows x64 →
-Run workflow. Download artifact `KAI-Windows-x64`.
+## Run
+1. Start `KAI_Control.exe` on the management PC.
+2. Start `KAI_Agent.exe` on the PC being audited. The default mode displays a status window.
+3. The agent discovers the Control Center on the same LAN and sends a report initially,
+   then every five minutes. The Control Center also loads reports already saved under
+   `%LOCALAPPDATA%\\KAI\\reports` when it starts.
+4. Select a report in the left list. Use the tabs to inspect its sections. Select exactly
+   two reports with Ctrl/Shift-click and choose **Сравнить выбранные (2)** to compare them.
 
-## Important operational/security notes
-- This is a functional LAN-audit implementation, not a certified enterprise product.
-  Validate it on isolated test machines before operational use.
-- Agent and Control Center must be on the same LAN/VLAN; Windows Firewall must allow
-  UDP 39571 and TCP 39572 between the two PCs.
-- The agent window is visible and closing it stops collection. No service/autostart/
-  stealth persistence is installed.
-- First-run pairing is currently session-scoped: Control Center generates a random
-  token and advertises it on the LAN; the agent pins the TLS certificate fingerprint
-  from the discovery beacon. Use only on a trusted LAN. For hostile/shared LANs,
-  add out-of-band pairing approval and encrypt/authenticate discovery itself.
+## Explicit headless launch
+For a user who deliberately starts the agent from a command line and does not want its
+status window, run:
+
+`KAI_Agent.exe --headless`
+
+This mode does not install a service, create an autorun entry, persist after reboot, or
+provide a remote shell. It remains a normal running process until the user stops it in
+Windows Task Manager (`KAI_Agent.exe`). The log is written to
+`%LOCALAPPDATA%\\KAI\\agent.log`. Do not use this mode on a computer without its owner's
+knowledge and authorization.
+
+## Network and security notes
+- Both PCs must be on a LAN/VLAN that allows UDP 39571 and TCP 39572 between them.
+- The current pairing token and certificate fingerprint are announced over UDP discovery.
+  This is suitable only for a trusted, isolated test LAN; it is not secure pairing against
+  an attacker on a shared/untrusted network. Do not expose these ports to the internet.
+- Reports can contain usernames, IP addresses, installed software, process names, network
+  connection details, and Windows event information. Protect the report folder and exports.
 - Event logs and some process/network details may require elevated rights; inaccessible
   data is omitted or marked unavailable.
-- Remote CMD is deliberately not implemented as a custom command executor. Use
-  Windows OpenSSH or PowerShell Remoting with named accounts, explicit authorization,
-  firewall restrictions, and audit policy. KAI does not silently execute commands.
-- No application can guarantee Windows Defender/SmartScreen will never warn about
-  an unsigned self-built binary. Code signing requires a trusted signing certificate.
+- KAI deliberately does not execute arbitrary CMD/PowerShell commands remotely. For
+  authorized administration, configure Windows OpenSSH Server or PowerShell Remoting
+  separately with named accounts, explicit authorization, firewall restrictions, and logs.
+- No application can guarantee Windows Defender/SmartScreen will never warn about an
+  unsigned self-built binary. Code signing requires a trusted signing certificate.
+
+## Build
+Upload repository contents to GitHub. Open Actions → Build KAI Windows x64 → Run workflow.
+Download artifact `KAI-Windows-x64`.

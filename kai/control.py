@@ -204,6 +204,28 @@ def readable_value(value):
     return str(value)
 
 def format_section(key, value):
+    if key == "network":
+        if not value:
+            return "Сетевые сведения не получены."
+        lines = []
+        adapters = value.get("adapters", {}) if isinstance(value, dict) else {}
+        for adapter, addresses in adapters.items():
+            lines.append(f"СЕТЕВОЙ АДАПТЕР: {adapter}")
+            for item in addresses:
+                family = item.get("family")
+                family_name = {"2": "IPv4", "10": "IPv6", "23": "IPv6"}.get(str(family), "Адрес")
+                lines.append(f"  {family_name}: {item.get('address', 'нет данных')}")
+                if item.get("netmask"):
+                    lines.append(f"  Маска: {item['netmask']}")
+        connections = value.get("connections", []) if isinstance(value, dict) else []
+        lines.append("")
+        lines.append(f"СЕТЕВЫЕ СОЕДИНЕНИЯ: {len(connections)}")
+        for i, item in enumerate(connections[:100], 1):
+            local = item.get("local", "—")
+            remote = item.get("remote", "—")
+            status = item.get("status", "не определено")
+            lines.append(f"{i}. {local}  →  {remote}  |  {status}")
+        return "\\n".join(lines) if lines else readable_value(value)
     if key == "processes":
         if not value:
             return "Сведения о процессах не получены."
@@ -246,44 +268,104 @@ class Control:
         self.set_status(f"Запуск сетевых служб. Ожидаемые порты: UDP {DISCOVERY_PORT}, TCP {APP_PORT}.")
 
     def _build_ui(self):
-        top = ttk.Frame(self.root, padding=12)
-        top.pack(fill="x")
-        ttk.Label(top, text="KAI Remote Audit", font=("Segoe UI", 19, "bold")).pack(side="left")
-        ttk.Label(top, text="Центр управления", foreground="gray").pack(side="left", padx=14)
-        self.status_label = ttk.Label(self.root, textvariable=self.status, padding=(12, 4))
-        self.status_label.pack(fill="x")
-        self.activity = tk.Text(self.root, height=4, wrap="word", font=("Segoe UI", 9),
-                                state="disabled", background="#f4f4f4")
-        self.activity.pack(fill="x", padx=12, pady=(0, 6))
+        # KAI dark / gold visual system
+        self.bg = "#090909"
+        self.panel = "#151515"
+        self.panel2 = "#202020"
+        self.gold = "#D6B45A"
+        self.gold_soft = "#B99A4B"
+        self.muted = "#B8A979"
+        self.root.configure(bg=self.bg)
+
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure(".", background=self.bg, foreground=self.gold,
+                        fieldbackground=self.panel, bordercolor=self.gold_soft,
+                        lightcolor=self.gold_soft, darkcolor=self.bg,
+                        font=("Segoe UI", 9))
+        style.configure("TFrame", background=self.bg)
+        style.configure("Panel.TFrame", background=self.panel)
+        style.configure("TLabel", background=self.bg, foreground=self.gold)
+        style.configure("Muted.TLabel", background=self.bg, foreground=self.muted)
+        style.configure("Header.TLabel", background=self.bg, foreground=self.gold,
+                        font=("Segoe UI", 18, "bold"))
+        style.configure("Section.TLabel", background=self.panel, foreground=self.gold,
+                        font=("Segoe UI", 10, "bold"))
+        style.configure("TButton", background=self.panel2, foreground=self.gold,
+                        bordercolor=self.gold_soft, padding=(10, 6))
+        style.map("TButton", background=[("active", "#34302A")],
+                  foreground=[("active", "#F2D889")])
+        style.configure("TNotebook", background=self.bg, bordercolor=self.gold_soft)
+        style.configure("TNotebook.Tab", background=self.panel2, foreground=self.gold,
+                        padding=(11, 7))
+        style.map("TNotebook.Tab", background=[("selected", "#34302A")],
+                  foreground=[("selected", "#F2D889")])
+        style.configure("Treeview", background=self.panel, fieldbackground=self.panel,
+                        foreground=self.gold, rowheight=27, bordercolor=self.gold_soft)
+        style.configure("Treeview.Heading", background=self.panel2, foreground=self.gold,
+                        font=("Segoe UI", 9, "bold"))
+        style.map("Treeview", background=[("selected", "#514326")],
+                  foreground=[("selected", "#FFE7A0")])
+
+        header = ttk.Frame(self.root, padding=(16, 12))
+        header.pack(fill="x")
+        ttk.Label(header, text="KAI  /  REMOTE AUDIT", style="Header.TLabel").pack(side="left")
+        ttk.Label(header, text="ЦЕНТР УПРАВЛЕНИЯ", style="Muted.TLabel").pack(side="left", padx=16)
+
+        # Current state is visually separated from the event history.
+        state_panel = ttk.Frame(self.root, style="Panel.TFrame", padding=(14, 9))
+        state_panel.pack(fill="x", padx=12, pady=(0, 7))
+        ttk.Label(state_panel, text="ТЕКУЩЕЕ СОСТОЯНИЕ", style="Section.TLabel").pack(anchor="w")
+        self.status_label = tk.Label(state_panel, textvariable=self.status,
+                                     bg=self.panel, fg=self.gold, anchor="w",
+                                     justify="left", font=("Segoe UI", 10, "bold"),
+                                     wraplength=1100)
+        self.status_label.pack(fill="x", pady=(5, 0))
+
+        # Short, bounded event log instead of a long mixed status line.
+        activity_panel = ttk.Frame(self.root, style="Panel.TFrame", padding=(14, 7))
+        activity_panel.pack(fill="x", padx=12, pady=(0, 8))
+        ttk.Label(activity_panel, text="ЖУРНАЛ ДЕЙСТВИЙ", style="Section.TLabel").pack(anchor="w")
+        self.activity = tk.Text(activity_panel, height=3, wrap="word",
+                                font=("Segoe UI", 9), state="disabled",
+                                background=self.panel, foreground=self.muted,
+                                insertbackground=self.gold, relief="flat",
+                                highlightthickness=1, highlightbackground=self.gold_soft)
+        self.activity.pack(fill="x", pady=(4, 0))
         self.log_activity("Центр управления запускается. Проверяется доступность сетевых портов.")
 
         main = ttk.Panedwindow(self.root, orient="horizontal")
-        main.pack(fill="both", expand=True, padx=10, pady=8)
-        left = ttk.Frame(main, padding=6)
-        right = ttk.Frame(main, padding=6)
+        main.pack(fill="both", expand=True, padx=12, pady=6)
+        left = ttk.Frame(main, style="Panel.TFrame", padding=9)
+        right = ttk.Frame(main, style="Panel.TFrame", padding=9)
         main.add(left, weight=1)
         main.add(right, weight=3)
 
-        ttk.Label(left, text="Компьютеры и история", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(left, text="КОМПЬЮТЕРЫ И ИСТОРИЯ", style="Section.TLabel").pack(anchor="w")
         search = ttk.Entry(left, textvariable=self.filter_text)
-        search.pack(fill="x", pady=(7, 5))
-        search.insert(0, "")
+        search.pack(fill="x", pady=(8, 7))
         self.filter_text.trace_add("write", lambda *_: self.refresh_reports())
         cols = ("pc", "ip", "time")
-        self.tree = ttk.Treeview(left, columns=cols, show="headings", selectmode="extended", height=22)
-        for col, title, width in [("pc", "Компьютер", 150), ("ip", "IP", 105), ("time", "Получен", 135)]:
+        self.tree = ttk.Treeview(left, columns=cols, show="headings",
+                                 selectmode="extended", height=22)
+        for col, title, width in [("pc", "Компьютер", 150), ("ip", "IP-адрес", 110),
+                                  ("time", "Получен", 125)]:
             self.tree.heading(col, text=title)
             self.tree.column(col, width=width, anchor="w")
-        self.tree.pack(fill="both", expand=True)
+        self.tree.pack(fill="both", expand=True, pady=(0, 7))
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
 
         actions = ttk.Frame(left)
-        actions.pack(fill="x", pady=7)
+        actions.pack(fill="x", pady=3)
         ttk.Button(actions, text="Обновить", command=self.refresh_reports).pack(side="left", padx=2)
-        ttk.Button(actions, text="Экспорт JSON", command=self.export_report).pack(side="left", padx=2)
-        ttk.Button(actions, text="Папка", command=lambda: os.startfile(DATA)).pack(side="left", padx=2)
-        ttk.Button(left, text="Сравнить выбранные (2)", command=self.compare_reports).pack(fill="x", pady=3)
+        ttk.Button(actions, text="Экспорт", command=self.export_report).pack(side="left", padx=2)
+        ttk.Button(actions, text="Папка отчётов", command=lambda: os.startfile(DATA)).pack(side="left", padx=2)
+        ttk.Button(left, text="Сравнить два отчёта", command=self.compare_reports).pack(fill="x", pady=(5, 2))
 
+        ttk.Label(right, text="АНАЛИТИКА И ДИАГНОСТИКА", style="Section.TLabel").pack(anchor="w", pady=(0, 7))
         self.notebook = ttk.Notebook(right)
         self.notebook.pack(fill="both", expand=True)
         self.views = {}
@@ -291,31 +373,41 @@ class Control:
             ("summary", "Сводка"), ("hardware", "Оборудование"),
             ("processes", "Процессы"), ("network", "Сеть"),
             ("software", "Программы"), ("events", "События Windows"),
-            ("raw", "Полный JSON")
+            ("raw", "Технические данные")
         ]:
-            frame = ttk.Frame(self.notebook, padding=8)
+            frame = ttk.Frame(self.notebook, padding=8, style="Panel.TFrame")
             self.notebook.add(frame, text=title)
-            text = tk.Text(frame, wrap="none", font=("Consolas", 9), state="disabled")
+            text = tk.Text(frame, wrap="word", font=("Segoe UI", 10),
+                           state="disabled", background=self.panel,
+                           foreground=self.gold, insertbackground=self.gold,
+                           selectbackground="#514326", selectforeground="#FFE7A0",
+                           relief="flat", padx=10, pady=8,
+                           highlightthickness=1, highlightbackground=self.gold_soft)
             y = ttk.Scrollbar(frame, orient="vertical", command=text.yview)
             x = ttk.Scrollbar(frame, orient="horizontal", command=text.xview)
             text.configure(yscrollcommand=y.set, xscrollcommand=x.set)
             text.grid(row=0, column=0, sticky="nsew")
             y.grid(row=0, column=1, sticky="ns")
             x.grid(row=1, column=0, sticky="ew")
-            frame.rowconfigure(0, weight=1); frame.columnconfigure(0, weight=1)
+            frame.rowconfigure(0, weight=1)
+            frame.columnconfigure(0, weight=1)
             self.views[key] = text
 
-        bottom = ttk.Frame(self.root, padding=(12, 4))
-        bottom.pack(fill="x")
-        ttk.Label(bottom, text="Агент отправляет диагностический отчёт по локальной сети. Произвольное выполнение CMD в KAI не предусмотрено.",
-                  foreground="gray").pack(anchor="w")
+        footer = ttk.Frame(self.root, padding=(14, 6))
+        footer.pack(fill="x")
+        ttk.Label(footer,
+                  text="KAI  •  Локальный аудит  •  Отчёты сохраняются на этом компьютере",
+                  style="Muted.TLabel").pack(anchor="w")
 
     def log_activity(self, value):
         if not hasattr(self, "activity"):
             return
         stamp = datetime.now().strftime("%H:%M:%S")
         self.activity.configure(state="normal")
-        self.activity.insert("end", f"{stamp} — {value}\\n")
+        self.activity.insert("end", f"{stamp} — {value}\n")
+        line_count = int(self.activity.index("end-1c").split(".")[0])
+        if line_count > 100:
+            self.activity.delete("1.0", f"{line_count-100}.0")
         self.activity.see("end")
         self.activity.configure(state="disabled")
 
@@ -430,9 +522,13 @@ class Control:
                             f"ВТОРОЙ ОТЧЁТ:\n"
                             f"{json.dumps(b.get(section), ensure_ascii=False, indent=2, default=str)}\n")
         win = tk.Toplevel(self.root)
-        win.title("Сравнение отчётов")
+        win.title("KAI — Сравнение отчётов")
         win.geometry("900x650")
-        text = tk.Text(win, wrap="none", font=("Consolas", 9))
+        win.configure(bg="#090909")
+        text = tk.Text(win, wrap="word", font=("Segoe UI", 10),
+                       background="#151515", foreground="#D6B45A",
+                       insertbackground="#D6B45A", selectbackground="#514326",
+                       relief="flat", padx=10, pady=8)
         sy = ttk.Scrollbar(win, orient="vertical", command=text.yview)
         sx = ttk.Scrollbar(win, orient="horizontal", command=text.xview)
         text.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)

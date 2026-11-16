@@ -65,3 +65,11 @@ internet. The current discovery beacon sends its temporary token over UDP, so th
 is intended only for an isolated, trusted virtual lab and is not suitable for an open/shared
 network. Use a properly authenticated VPN or a separately configured secure remote
 administration service for networks you do not control.
+
+
+## KAI interface theme
+The Control Center uses a black and gold palette. Current connection state and
+the action history are separate areas; the action history is bounded to the latest
+100 entries so it does not crowd the dashboard. Diagnostic tabs use readable
+Russian text and a consistent layout. The technical JSON tab remains available
+for troubleshooting and export.

@@ -80,3 +80,10 @@ Network adapters and connections are now presented as readable entries with
 friendly connection-state names and compact endpoint notation. The main report
 text is white, gold is reserved for accents, and tab content uses a minimal
 scrollbar without Windows arrow buttons.
+
+
+## Data rendering reliability
+The report viewer now isolates errors per tab so a malformed network field cannot stop later tabs from rendering. The network endpoint parser handles the serialized psutil address format used by this agent. Missing fields are shown as a clear message instead of leaving a tab blank.
+
+## Remote command execution
+This package does not yet include remote CMD execution. The current agent protocol only uploads reports; adding an interactive remote shell requires a separately authenticated, explicitly enabled command channel and an action audit log. No fake terminal is presented as a working remote shell.

@@ -1,4 +1,4 @@
-import json, os, tkinter as tk
+import json, os, re, tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 from datetime import datetime
@@ -211,7 +211,9 @@ def format_section(key, value):
         adapters = value.get("adapters", {}) if isinstance(value, dict) else {}
         family_names = {"2": "IPv4", "10": "IPv6", "23": "IPv6"}
         for adapter_name, addresses in adapters.items():
-            useful = [a for a in addresses if a.get("address")]
+            if not isinstance(addresses, list):
+                continue
+            useful = [a for a in addresses if isinstance(a, dict) and a.get("address")]
             if not useful:
                 continue
             lines.append(f"{adapter_name}")
@@ -222,6 +224,8 @@ def format_section(key, value):
                     lines.append(f"  Маска: {item['netmask']}")
             lines.append("")
         connections = value.get("connections", []) if isinstance(value, dict) else []
+        if not isinstance(connections, list):
+            connections = []
         state_names = {
             "ESTABLISHED": "Активно",
             "LISTEN": "Ожидает подключения",
@@ -238,7 +242,7 @@ def format_section(key, value):
             if not raw:
                 return "—"
             # psutil namedtuple string form: addr(ip='1.2.3.4', port=443)
-            match = re.search(r"ip=['\"](.*?)['\"],\\s*port=(\\d+)", str(raw))
+            match = re.search(r"ip=['\"](.*?)['\"],\s*port=(\d+)", str(raw))
             if match:
                 host, port = match.groups()
                 return f"{host}:{port}"
@@ -247,6 +251,8 @@ def format_section(key, value):
         lines.append(f"Всего записей: {len(connections)}")
         lines.append("")
         for i, item in enumerate(connections[:100], 1):
+            if not isinstance(item, dict):
+                continue
             local = endpoint(item.get("local"))
             remote = endpoint(item.get("remote"))
             raw_state = str(item.get("status") or "NONE")
@@ -262,6 +268,8 @@ def format_section(key, value):
             lines.append(f"Показаны первые 100 из {len(connections)} соединений.")
         return "\n\n".join(lines) if lines else "Сетевые адаптеры и соединения не обнаружены."
     if key == "processes":
+        if isinstance(value, dict):
+            value = value.get("items", value.get("processes", []))
         if not value:
             return "Сведения о процессах не получены."
         rows = []
@@ -276,6 +284,8 @@ def format_section(key, value):
             )
         return "\n\n".join(rows)
     if key == "software":
+        if isinstance(value, dict):
+            value = value.get("items", value.get("software", []))
         if not value:
             return "Список установленных программ пуст или недоступен."
         return "\n\n".join(
@@ -414,17 +424,17 @@ class Control:
         self.notebook.pack(fill="both", expand=True)
         self.views = {}
         for key, title in [
-            ("summary", "Сводка"), ("hardware", "Оборудование"),
-            ("processes", "Процессы"), ("network", "Сеть"),
-            ("software", "Программы"), ("events", "События Windows"),
-            ("raw", "Технические данные")
+            ("summary", "◈  Сводка"), ("hardware", "▦  Оборудование"),
+            ("processes", "▤  Процессы"), ("network", "⌁  Сеть"),
+            ("software", "▣  Программы"), ("events", "◷  События Windows"),
+            ("raw", "⚙  Технические данные")
         ]:
             frame = ttk.Frame(self.notebook, padding=8, style="Panel.TFrame")
             self.notebook.add(frame, text=title)
             text = tk.Text(frame, wrap="word", font=("Segoe UI", 10),
                            state="disabled", background=self.panel,
-                           foreground=self.gold, insertbackground=self.gold,
-                           selectbackground="#514326", selectforeground="#FFE7A0",
+                           foreground=self.white, insertbackground=self.gold,
+                           selectbackground="#514326", selectforeground="#FFFFFF",
                            relief="flat", padx=12, pady=10,
                            highlightthickness=0)
             y = ttk.Scrollbar(frame, orient="vertical", style="KAI.Vertical.TScrollbar",
@@ -525,13 +535,22 @@ class Control:
             "Процессов": len(report.get("processes", []) or []),
             "Установленных программ": len(report.get("software", []) or []),
         }
-        self._put("summary", summary)
-        self._put("hardware", format_section("hardware", report.get("hardware", {})))
-        self._put("processes", format_section("processes", report.get("processes", [])))
-        self._put("network", format_section("network", report.get("network", {})))
-        self._put("software", format_section("software", report.get("software", [])))
-        self._put("events", format_section("events", report.get("events", {})))
-        self._put("raw", report)
+        sections = {
+            "summary": lambda: readable_value(summary),
+            "hardware": lambda: format_section("hardware", report.get("hardware", {})),
+            "processes": lambda: format_section("processes", report.get("processes", [])),
+            "network": lambda: format_section("network", report.get("network", {})),
+            "software": lambda: format_section("software", report.get("software", [])),
+            "events": lambda: format_section("events", report.get("events", {})),
+            "raw": lambda: json.dumps(report, ensure_ascii=False, indent=2, default=str),
+        }
+        for key, render in sections.items():
+            try:
+                value = render()
+                self._put(key, value if value else "Для этого раздела в отчёте нет данных.")
+            except Exception as exc:
+                self._put(key, f"Не удалось отобразить раздел. Ошибка обработки данных: {exc}")
+                self.log_activity(f"Ошибка отображения раздела «{key}»: {exc}")
 
     def selected_paths(self):
         return [self.paths[i] for i in self.tree.selection() if i in self.paths]
